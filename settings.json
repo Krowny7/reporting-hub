@@ -1,7 +1,7 @@
 {
   "appearance": "Dark",
   "excel_mode": "minimized",
-  "report_type": "weekly",
+  "report_type": "semiannual",
   "pilot_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V3/PilotTest.xlsm",
   "pilot_macro": "Run_MonthEnd_Update",
   "pilot_args": "",
@@ -14,20 +14,20 @@
     },
     "weekly": {
       "label": "Weekly",
-      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V3/PilotTest.xlsm",
-      "macro": "Run_MonthEnd_Update",
+      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V4/Pilote Hebdo.xlsm",
+      "macro": "Run_Weekly_Update",
       "args": ""
     },
     "quarterly": {
       "label": "Quarterly",
-      "workbook_path": "",
-      "macro": "Run_MonthEnd_Update",
+      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V4/Pilote Trim.xlsm",
+      "macro": "Run_Quarterly_Update",
       "args": ""
     },
     "semiannual": {
       "label": "Semiannual",
-      "workbook_path": "",
-      "macro": "Run_MonthEnd_Update",
+      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V4/Pilote Semestre.xlsm",
+      "macro": "Run_Semiannual_Update",
       "args": ""
     }
   }

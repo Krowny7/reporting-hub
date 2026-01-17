@@ -14,6 +14,7 @@ from .config.constants import (
     SETTINGS_PATH,
     REPORT_TYPE_OPTIONS,
     DEFAULT_REPORT_TYPE,
+    REPORT_TYPE_DEFAULT_MACROS,
 )
 from .config.io import load_settings, save_settings
 from .config.models import MacroDefinition
@@ -49,7 +50,6 @@ class App(ctk.CTk):
         self.after(50, self._maximize_window_reliably)
 
         # Excel COM must run on a single dedicated thread.
-        # This keeps the UI responsive even for 30-60min macros.
         self.excel_worker: ExcelWorker | None = None
         self._running = False
         self._run_start_ts: float | None = None
@@ -71,7 +71,6 @@ class App(ctk.CTk):
         # Start background worker (Excel COM thread)
         try:
             self.excel_worker.start()
-            # Apply persisted mode to the worker (takes effect once Excel is launched)
             self.excel_worker.submit("set_mode", self.excel_mode.get())
         except Exception:
             pass
@@ -240,12 +239,11 @@ class App(ctk.CTk):
             row=4, column=0, padx=18, pady=(0, 18), sticky="ew"
         )
 
-        # Spacer to push logs to the bottom of the sidebar
+        # Spacer to push logs to bottom
         spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         spacer.grid(row=50, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(50, weight=1)
 
-        # Logs card (small, in the left sidebar)
         logs_card = Card(self.sidebar, "Logs", "Execution output")
         logs_card.grid(row=60, column=0, padx=18, pady=(0, 18), sticky="ew")
 
@@ -259,10 +257,6 @@ class App(ctk.CTk):
             wrap="none",
         )
         self.logbox.grid(row=2, column=0, padx=18, pady=(10, 18), sticky="ew")
-        try:
-            self.logbox.configure(state="normal")
-        except Exception:
-            pass
 
     # ---------- Pages ----------
     def _clear_pages(self):
@@ -281,7 +275,7 @@ class App(ctk.CTk):
             self.page_title.configure(text="Settings")
             self.page_settings.grid(row=0, column=0, sticky="nsew")
 
-    # ---------- Settings / Profiles ----------
+    # ---------- Profiles ----------
     def _report_type_label(self, key: str) -> str:
         k = (key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
         return k[:1].upper() + k[1:]
@@ -291,31 +285,24 @@ class App(ctk.CTk):
         allowed = {v.strip().lower() for v in REPORT_TYPE_OPTIONS}
         return k if k in allowed else DEFAULT_REPORT_TYPE
 
-    def _ensure_monthly_profile(self) -> None:
-        """Migrate legacy single-pilot settings into the monthly profile (one-time)."""
-        if "monthly" in self.settings.macros:
-            return
-        if not (self.settings.pilot_path or self.settings.pilot_macro or self.settings.pilot_args):
-            return
-        self.settings.macros["monthly"] = MacroDefinition(
-            label="Monthly",
-            workbook_path=self.settings.pilot_path or "",
-            macro=(self.settings.pilot_macro or DEFAULT_PILOT_MACRO),
-            args=self.settings.pilot_args or "",
-        )
+    def _default_macro_for(self, report_key: str) -> str:
+        key = (report_key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
+        return REPORT_TYPE_DEFAULT_MACROS.get(key, DEFAULT_PILOT_MACRO)
 
     def _get_profile(self, report_key: str) -> MacroDefinition:
-        self._ensure_monthly_profile()
         key = (report_key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
         prof = self.settings.macros.get(key)
         if prof is None:
             prof = MacroDefinition(
                 label=self._report_type_label(key),
                 workbook_path="",
-                macro=DEFAULT_PILOT_MACRO,
+                macro=self._default_macro_for(key),
                 args="",
             )
             self.settings.macros[key] = prof
+        # Auto-fix: if profile has empty macro, set a sensible default
+        if not (prof.macro or "").strip():
+            prof.macro = self._default_macro_for(key)
         return prof
 
     def _set_entry(self, entry, value: str) -> None:
@@ -329,25 +316,16 @@ class App(ctk.CTk):
             pass
 
     def _persist_profile(self, report_key: str) -> None:
-        """Persist current widget values into the specified profile key."""
         key = (report_key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
         prof = self._get_profile(key)
 
         prof.workbook_path = self.pilot_path_entry.get().strip() if getattr(self, "pilot_path_entry", None) else ""
-        prof.macro = (
-            (self.pilot_macro_entry.get().strip() if getattr(self, "pilot_macro_entry", None) else "")
-            or DEFAULT_PILOT_MACRO
-        )
+        macro_in = self.pilot_macro_entry.get().strip() if getattr(self, "pilot_macro_entry", None) else ""
+        prof.macro = macro_in or self._default_macro_for(key)
         prof.args = self.pilot_args_entry.get().strip() if getattr(self, "pilot_args_entry", None) else ""
         prof.label = self._report_type_label(key)
 
         self.settings.macros[key] = prof
-
-        # Backward-compatible keys remain tied to MONTHLY
-        if key == "monthly":
-            self.settings.pilot_path = prof.workbook_path
-            self.settings.pilot_macro = prof.macro
-            self.settings.pilot_args = prof.args
 
     def _apply_settings_to_widgets(self) -> None:
         mode = (self.settings.excel_mode or "minimized").strip().lower()
@@ -358,21 +336,18 @@ class App(ctk.CTk):
             or DEFAULT_REPORT_TYPE
         )
 
-        # Update selector label if it exists (created in update page)
         if getattr(self, "report_type_var", None) is not None:
             self.report_type_var.set(self._report_type_label(self._active_report_type))
 
-        # Load the active profile into entries
         prof = self._get_profile(self._active_report_type)
         self._set_entry(getattr(self, "pilot_path_entry", None), prof.workbook_path)
-        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or DEFAULT_PILOT_MACRO)
+        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or self._default_macro_for(self._active_report_type))
         self._set_entry(getattr(self, "pilot_args_entry", None), prof.args or "")
 
     def _persist_settings_from_widgets(self) -> None:
         self.settings.appearance = self.appearance.get().strip() or "Dark"
         self.settings.excel_mode = self.excel_mode.get().strip().lower() or "minimized"
 
-        # Selected report type
         label = (
             self.report_type_var.get()
             if getattr(self, "report_type_var", None) is not None
@@ -381,12 +356,11 @@ class App(ctk.CTk):
         self._active_report_type = self._report_type_key(label)
         self.settings.report_type = self._active_report_type
 
-        # Persist current profile values
         self._persist_profile(self._active_report_type)
-
         save_settings(SETTINGS_PATH, self.settings)
 
     def on_save_settings(self):
+        """Used by Settings page button."""
         self._persist_settings_from_widgets()
         self.toast.show("Saved.")
 
@@ -399,8 +373,7 @@ class App(ctk.CTk):
         save_settings(SETTINGS_PATH, self.settings)
 
     def on_change_report_type(self, value: str):
-        """Switch reporting frequency (each has its own pilot workbook + macro settings)."""
-        # Save current inputs into the current profile before switching.
+        # Save current inputs before switching
         try:
             self._persist_profile(self._active_report_type)
         except Exception:
@@ -410,24 +383,22 @@ class App(ctk.CTk):
         self._active_report_type = new_key
         self.settings.report_type = new_key
 
-        # Load new profile into inputs.
         prof = self._get_profile(new_key)
+
+        # If macro was never changed and is still the monthly default, auto-switch to frequency default
+        if (prof.macro or "").strip() in ("", DEFAULT_PILOT_MACRO) and new_key != "monthly":
+            prof.macro = self._default_macro_for(new_key)
+            self.settings.macros[new_key] = prof
+
         self._set_entry(getattr(self, "pilot_path_entry", None), prof.workbook_path)
-        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or DEFAULT_PILOT_MACRO)
+        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or self._default_macro_for(new_key))
         self._set_entry(getattr(self, "pilot_args_entry", None), prof.args or "")
 
-        # Normalize selector label
         if getattr(self, "report_type_var", None) is not None:
-            label = self._report_type_label(new_key)
-            if self.report_type_var.get() != label:
-                self.report_type_var.set(label)
+            self.report_type_var.set(self._report_type_label(new_key))
 
         save_settings(SETTINGS_PATH, self.settings)
-
-        try:
-            self.toast.show(f"{self._report_type_label(new_key)} selected.")
-        except Exception:
-            pass
+        self.toast.show(f"{self._report_type_label(new_key)} selected.")
 
     # ---------- Logging ----------
     def log(self, msg: str):
@@ -486,10 +457,7 @@ class App(ctk.CTk):
             elapsed = int(time.time() - float(self._run_start_ts or time.time()))
             mm, ss = divmod(elapsed, 60)
             hh, mm = divmod(mm, 60)
-            if hh:
-                label = f"Running… {hh:02d}:{mm:02d}:{ss:02d}"
-            else:
-                label = f"Running… {mm:02d}:{ss:02d}"
+            label = f"Running… {hh:02d}:{mm:02d}:{ss:02d}" if hh else f"Running… {mm:02d}:{ss:02d}"
             self.quick_status.configure(text=label, text_color=MUTED)
         except Exception:
             pass
@@ -548,17 +516,15 @@ class App(ctk.CTk):
             return
         self.pilot_path_entry.delete(0, "end")
         self.pilot_path_entry.insert(0, path)
-
-        # Persist into the currently selected report type profile
         self._persist_settings_from_widgets()
         self.toast.show("Pilot selected.")
 
     def on_run_pilot(self):
-        # Persist current UI state (report type + profile)
+        # Persist current UI state
         self._persist_settings_from_widgets()
 
         pilot_path = self.pilot_path_entry.get().strip()
-        macro = (self.pilot_macro_entry.get().strip() or DEFAULT_PILOT_MACRO)
+        macro = (self.pilot_macro_entry.get().strip() or self._default_macro_for(self._active_report_type))
         raw_args = self.pilot_args_entry.get().strip()
 
         if not pilot_path or not os.path.exists(pilot_path):
