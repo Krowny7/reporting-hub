@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import threading
-import traceback
 import ctypes
 import time
 from datetime import datetime
@@ -10,8 +8,16 @@ from datetime import datetime
 import customtkinter as ctk
 from tkinter import filedialog
 
-from .config.constants import APP_TITLE, DEFAULT_PILOT_MACRO, SETTINGS_PATH
+from .config.constants import (
+    APP_TITLE,
+    DEFAULT_PILOT_MACRO,
+    SETTINGS_PATH,
+    REPORT_TYPE_OPTIONS,
+    DEFAULT_REPORT_TYPE,
+)
 from .config.io import load_settings, save_settings
+from .config.models import MacroDefinition
+
 from .excel.worker import ExcelWorker
 from .gui.style import BG_APP, MUTED, TEXT, apply_app_style
 from .gui.widgets import Card, ToastHost, btn_primary, btn_ghost
@@ -27,6 +33,12 @@ class App(ctk.CTk):
         # Load settings first (to apply appearance)
         self.settings = load_settings(SETTINGS_PATH)
         apply_app_style(self.settings.appearance or "Dark")
+
+        # Active report type (weekly/monthly/quarterly/semiannual)
+        self._active_report_type = (
+            (self.settings.report_type or DEFAULT_REPORT_TYPE).strip().lower()
+            or DEFAULT_REPORT_TYPE
+        )
 
         self.configure(fg_color=BG_APP)
         self.title(APP_TITLE)
@@ -50,6 +62,7 @@ class App(ctk.CTk):
         self._card_mini = None
 
         self._build_root()
+
         # Start the Excel worker AFTER UI widgets exist (toast/log uses Tk).
         self.excel_worker = ExcelWorker(self, ui_log=self.log, ui_toast=self.toast.show)
 
@@ -81,6 +94,7 @@ class App(ctk.CTk):
             self.destroy()
         except Exception:
             pass
+
     def _maximize_window_reliably(self):
         try:
             self.update_idletasks()
@@ -105,18 +119,8 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-    # NOTE:
-    # We intentionally do NOT enforce any minimum row heights on the Update dashboard.
-    # On Windows with DPI scaling (125%/150%) or smaller screens, hard minsize constraints
-    # can make the dashboard taller than the available viewport (topbar + fixed log panel).
-    # CustomTkinter does not clip overflow, so content may visually draw over the log area.
-    # The Update page is therefore fully responsive (weights only).
-
     # ---------- Layout ----------
     def _build_root(self):
-        # Avoid nesting multiple "transparent" frames.
-        # On some Windows + DPI combinations, CTk redraw order can produce
-        # visual overlap artifacts (especially with rounded cards).
         self.root = ctk.CTkFrame(self, corner_radius=0, fg_color=BG_APP)
         self.root.pack(fill="both", expand=True)
 
@@ -146,7 +150,12 @@ class App(ctk.CTk):
         self.topbar.grid(row=0, column=0, sticky="ew", padx=22, pady=(18, 10))
         self.topbar.grid_columnconfigure(1, weight=1)
 
-        self.page_title = ctk.CTkLabel(self.topbar, text="Update", font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT)
+        self.page_title = ctk.CTkLabel(
+            self.topbar,
+            text="Update",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=TEXT,
+        )
         self.page_title.grid(row=0, column=0, sticky="w")
 
         self.quick_status = ctk.CTkLabel(self.topbar, text="Ready", text_color=MUTED)
@@ -167,10 +176,6 @@ class App(ctk.CTk):
         self.pages.grid_rowconfigure(0, weight=1)
         self.pages.grid_columnconfigure(0, weight=1)
 
-        # Logs are displayed in the sidebar (small), to avoid consuming
-        # vertical space on the main page.
-        self.logbox = None
-
         # Toasts
         self.toast = ToastHost(self.content)
 
@@ -183,15 +188,20 @@ class App(ctk.CTk):
 
         self.show_page("update")
 
-        # No grid minsize stabilizer: keeps layout responsive and prevents visual overlap.
-
     def _build_sidebar(self):
-        ctk.CTkLabel(self.sidebar, text="REPORTING HUB", font=ctk.CTkFont(size=12, weight="bold"), text_color=MUTED).grid(
-            row=0, column=0, padx=18, pady=(18, 6), sticky="w"
-        )
-        ctk.CTkLabel(self.sidebar, text="Automation", font=ctk.CTkFont(size=24, weight="bold"), text_color=TEXT).grid(
-            row=1, column=0, padx=18, pady=(0, 18), sticky="w"
-        )
+        ctk.CTkLabel(
+            self.sidebar,
+            text="REPORTING HUB",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=MUTED,
+        ).grid(row=0, column=0, padx=18, pady=(18, 6), sticky="w")
+
+        ctk.CTkLabel(
+            self.sidebar,
+            text="Automation",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color=TEXT,
+        ).grid(row=1, column=0, padx=18, pady=(0, 18), sticky="w")
 
         btn_primary(self.sidebar, "Update", command=lambda: self.show_page("update"), height=42).grid(
             row=2, column=0, padx=18, pady=(0, 10), sticky="ew"
@@ -219,8 +229,12 @@ class App(ctk.CTk):
         row.grid(row=3, column=0, padx=18, pady=(0, 16), sticky="ew")
         row.grid_columnconfigure((0, 1), weight=1)
 
-        btn_primary(row, "Launch", command=self.on_launch_excel, height=40).grid(row=0, column=0, padx=(0, 8), sticky="ew")
-        btn_ghost(row, "Quit", command=self.on_quit_excel, height=40).grid(row=0, column=1, padx=(8, 0), sticky="ew")
+        btn_primary(row, "Launch", command=self.on_launch_excel, height=40).grid(
+            row=0, column=0, padx=(0, 8), sticky="ew"
+        )
+        btn_ghost(row, "Quit", command=self.on_quit_excel, height=40).grid(
+            row=0, column=1, padx=(8, 0), sticky="ew"
+        )
 
         btn_ghost(excel_card, "Show 10s", command=self.on_show_excel_10s, height=40).grid(
             row=4, column=0, padx=18, pady=(0, 18), sticky="ew"
@@ -267,28 +281,108 @@ class App(ctk.CTk):
             self.page_title.configure(text="Settings")
             self.page_settings.grid(row=0, column=0, sticky="nsew")
 
-    # ---------- Settings ----------
+    # ---------- Settings / Profiles ----------
+    def _report_type_label(self, key: str) -> str:
+        k = (key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
+        return k[:1].upper() + k[1:]
+
+    def _report_type_key(self, label: str) -> str:
+        k = (label or "").strip().lower()
+        allowed = {v.strip().lower() for v in REPORT_TYPE_OPTIONS}
+        return k if k in allowed else DEFAULT_REPORT_TYPE
+
+    def _ensure_monthly_profile(self) -> None:
+        """Migrate legacy single-pilot settings into the monthly profile (one-time)."""
+        if "monthly" in self.settings.macros:
+            return
+        if not (self.settings.pilot_path or self.settings.pilot_macro or self.settings.pilot_args):
+            return
+        self.settings.macros["monthly"] = MacroDefinition(
+            label="Monthly",
+            workbook_path=self.settings.pilot_path or "",
+            macro=(self.settings.pilot_macro or DEFAULT_PILOT_MACRO),
+            args=self.settings.pilot_args or "",
+        )
+
+    def _get_profile(self, report_key: str) -> MacroDefinition:
+        self._ensure_monthly_profile()
+        key = (report_key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
+        prof = self.settings.macros.get(key)
+        if prof is None:
+            prof = MacroDefinition(
+                label=self._report_type_label(key),
+                workbook_path="",
+                macro=DEFAULT_PILOT_MACRO,
+                args="",
+            )
+            self.settings.macros[key] = prof
+        return prof
+
+    def _set_entry(self, entry, value: str) -> None:
+        if entry is None:
+            return
+        try:
+            entry.delete(0, "end")
+            if value:
+                entry.insert(0, value)
+        except Exception:
+            pass
+
+    def _persist_profile(self, report_key: str) -> None:
+        """Persist current widget values into the specified profile key."""
+        key = (report_key or DEFAULT_REPORT_TYPE).strip().lower() or DEFAULT_REPORT_TYPE
+        prof = self._get_profile(key)
+
+        prof.workbook_path = self.pilot_path_entry.get().strip() if getattr(self, "pilot_path_entry", None) else ""
+        prof.macro = (
+            (self.pilot_macro_entry.get().strip() if getattr(self, "pilot_macro_entry", None) else "")
+            or DEFAULT_PILOT_MACRO
+        )
+        prof.args = self.pilot_args_entry.get().strip() if getattr(self, "pilot_args_entry", None) else ""
+        prof.label = self._report_type_label(key)
+
+        self.settings.macros[key] = prof
+
+        # Backward-compatible keys remain tied to MONTHLY
+        if key == "monthly":
+            self.settings.pilot_path = prof.workbook_path
+            self.settings.pilot_macro = prof.macro
+            self.settings.pilot_args = prof.args
+
     def _apply_settings_to_widgets(self) -> None:
         mode = (self.settings.excel_mode or "minimized").strip().lower()
         self.excel_mode.set(mode)
 
-        if getattr(self, "pilot_path_entry", None) is not None and self.settings.pilot_path:
-            self.pilot_path_entry.insert(0, self.settings.pilot_path)
+        self._active_report_type = (
+            (self.settings.report_type or DEFAULT_REPORT_TYPE).strip().lower()
+            or DEFAULT_REPORT_TYPE
+        )
 
-        macro = self.settings.pilot_macro or DEFAULT_PILOT_MACRO
-        if getattr(self, "pilot_macro_entry", None) is not None and macro:
-            self.pilot_macro_entry.insert(0, macro)
+        # Update selector label if it exists (created in update page)
+        if getattr(self, "report_type_var", None) is not None:
+            self.report_type_var.set(self._report_type_label(self._active_report_type))
 
-        if getattr(self, "pilot_args_entry", None) is not None and self.settings.pilot_args:
-            self.pilot_args_entry.insert(0, self.settings.pilot_args)
+        # Load the active profile into entries
+        prof = self._get_profile(self._active_report_type)
+        self._set_entry(getattr(self, "pilot_path_entry", None), prof.workbook_path)
+        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or DEFAULT_PILOT_MACRO)
+        self._set_entry(getattr(self, "pilot_args_entry", None), prof.args or "")
 
     def _persist_settings_from_widgets(self) -> None:
         self.settings.appearance = self.appearance.get().strip() or "Dark"
         self.settings.excel_mode = self.excel_mode.get().strip().lower() or "minimized"
 
-        self.settings.pilot_path = self.pilot_path_entry.get().strip() if getattr(self, "pilot_path_entry", None) else ""
-        self.settings.pilot_macro = (self.pilot_macro_entry.get().strip() if getattr(self, "pilot_macro_entry", None) else "") or DEFAULT_PILOT_MACRO
-        self.settings.pilot_args = self.pilot_args_entry.get().strip() if getattr(self, "pilot_args_entry", None) else ""
+        # Selected report type
+        label = (
+            self.report_type_var.get()
+            if getattr(self, "report_type_var", None) is not None
+            else self._report_type_label(self._active_report_type)
+        )
+        self._active_report_type = self._report_type_key(label)
+        self.settings.report_type = self._active_report_type
+
+        # Persist current profile values
+        self._persist_profile(self._active_report_type)
 
         save_settings(SETTINGS_PATH, self.settings)
 
@@ -303,6 +397,37 @@ class App(ctk.CTk):
             pass
         self.settings.appearance = mode
         save_settings(SETTINGS_PATH, self.settings)
+
+    def on_change_report_type(self, value: str):
+        """Switch reporting frequency (each has its own pilot workbook + macro settings)."""
+        # Save current inputs into the current profile before switching.
+        try:
+            self._persist_profile(self._active_report_type)
+        except Exception:
+            pass
+
+        new_key = self._report_type_key(value)
+        self._active_report_type = new_key
+        self.settings.report_type = new_key
+
+        # Load new profile into inputs.
+        prof = self._get_profile(new_key)
+        self._set_entry(getattr(self, "pilot_path_entry", None), prof.workbook_path)
+        self._set_entry(getattr(self, "pilot_macro_entry", None), prof.macro or DEFAULT_PILOT_MACRO)
+        self._set_entry(getattr(self, "pilot_args_entry", None), prof.args or "")
+
+        # Normalize selector label
+        if getattr(self, "report_type_var", None) is not None:
+            label = self._report_type_label(new_key)
+            if self.report_type_var.get() != label:
+                self.report_type_var.set(label)
+
+        save_settings(SETTINGS_PATH, self.settings)
+
+        try:
+            self.toast.show(f"{self._report_type_label(new_key)} selected.")
+        except Exception:
+            pass
 
     # ---------- Logging ----------
     def log(self, msg: str):
@@ -327,7 +452,6 @@ class App(ctk.CTk):
         if self._running:
             self._run_start_ts = time.time()
             try:
-                # Prefer indeterminate for long macros (no ETA).
                 self.progress.configure(mode="indeterminate")
                 self.progress.start()
             except Exception:
@@ -424,10 +548,15 @@ class App(ctk.CTk):
             return
         self.pilot_path_entry.delete(0, "end")
         self.pilot_path_entry.insert(0, path)
+
+        # Persist into the currently selected report type profile
         self._persist_settings_from_widgets()
         self.toast.show("Pilot selected.")
 
     def on_run_pilot(self):
+        # Persist current UI state (report type + profile)
+        self._persist_settings_from_widgets()
+
         pilot_path = self.pilot_path_entry.get().strip()
         macro = (self.pilot_macro_entry.get().strip() or DEFAULT_PILOT_MACRO)
         raw_args = self.pilot_args_entry.get().strip()
@@ -442,7 +571,6 @@ class App(ctk.CTk):
             self.toast.show("Excel worker not ready.")
             return
 
-        # UI: start indeterminate progress + disable the button.
         self._set_running(True)
         self.toast.show("Running…")
 
@@ -467,5 +595,3 @@ class App(ctk.CTk):
             on_ok=ok,
             on_err=err,
         )
-
-        self._persist_settings_from_widgets()

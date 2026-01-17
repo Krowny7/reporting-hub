@@ -21,6 +21,9 @@ class Settings:
     appearance: str = "Dark"
     excel_mode: str = "minimized"  # minimized | hidden | visible
 
+    # Default report frequency selected in the Update page
+    report_type: str = "monthly"  # weekly | monthly | quarterly | semiannual
+
     # Pilot (backward-compatible with your current UI)
     pilot_path: str = ""
     pilot_macro: str = "Run_MonthEnd_Update"

@@ -1,8 +1,34 @@
 {
   "appearance": "Dark",
   "excel_mode": "minimized",
+  "report_type": "weekly",
   "pilot_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V3/PilotTest.xlsm",
   "pilot_macro": "Run_MonthEnd_Update",
   "pilot_args": "",
-  "macros": {}
+  "macros": {
+    "monthly": {
+      "label": "Monthly",
+      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V3/PilotTest.xlsm",
+      "macro": "Run_MonthEnd_Update",
+      "args": ""
+    },
+    "weekly": {
+      "label": "Weekly",
+      "workbook_path": "C:/Users/chaum/Documents/Dossier Code/Projets tests/Projet Pilote/V3/PilotTest.xlsm",
+      "macro": "Run_MonthEnd_Update",
+      "args": ""
+    },
+    "quarterly": {
+      "label": "Quarterly",
+      "workbook_path": "",
+      "macro": "Run_MonthEnd_Update",
+      "args": ""
+    },
+    "semiannual": {
+      "label": "Semiannual",
+      "workbook_path": "",
+      "macro": "Run_MonthEnd_Update",
+      "args": ""
+    }
+  }
 }

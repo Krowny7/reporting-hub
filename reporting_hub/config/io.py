@@ -49,6 +49,9 @@ def load_settings(path: Path) -> Settings:
     s.appearance = str(data.get("appearance", s.appearance))
     s.excel_mode = str(data.get("excel_mode", s.excel_mode))
 
+    # Selected report frequency (stored as a lower-case key)
+    s.report_type = str(data.get("report_type", s.report_type)).strip().lower() or s.report_type
+
     # Backward-compatible keys
     s.pilot_path = str(data.get("pilot_path", s.pilot_path))
     s.pilot_macro = str(data.get("pilot_macro", s.pilot_macro))
@@ -62,6 +65,7 @@ def _settings_to_dict(settings: Settings) -> Dict[str, Any]:
     return {
         "appearance": settings.appearance,
         "excel_mode": settings.excel_mode,
+        "report_type": settings.report_type,
         "pilot_path": settings.pilot_path,
         "pilot_macro": settings.pilot_macro,
         "pilot_args": settings.pilot_args,
